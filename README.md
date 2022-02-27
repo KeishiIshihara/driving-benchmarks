@@ -1,6 +1,7 @@
 CARLA Driving Benchmarks Repository
 ===================================
 
+**Note**: This is a fork from the original repository [here](https://github.com/carla-simulator/driving-benchmarks).
 
 This repository was made in order to store different driving benchmarks
 that run on the [CARLA simulator](https://github.com/carla-simulator/carla)
