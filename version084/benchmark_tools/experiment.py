@@ -22,7 +22,7 @@ class Experiment(object):
     """
 
     def __init__(self):
-        self.Task = 0
+        self.Task = None
         self.TaskName = ''
         self.Conditions = CarlaSettings()
         self.Poses = [[]]
@@ -34,11 +34,10 @@ class Experiment(object):
                 raise ValueError('Experiment: no key named %r' % key)
             setattr(self, key, value)
 
-
-
     @property
     def task(self):
         return self.Task
+
     @property
     def task_name(self):
         return self.TaskName

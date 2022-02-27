@@ -1,18 +1,19 @@
 import csv
 import datetime
 import os
-
+from pathlib import Path
 
 class Recording(object):
 
     def __init__(self,
                  name_to_save,
                  continue_experiment,
-                 save_images
-
+                 save_images,
+                 log_dir,
                  ):
 
         self._dict_summary = {'exp_id': -1,
+                              'task_id': -1,
                               'rep': -1,
                               'weather': -1,
                               'start_point': -1,
@@ -26,9 +27,12 @@ class Recording(object):
                               'end_vehicle_collision': -1,
                               'end_other_collision': -1,
                               'number_red_lights': -1,
+                              'number_yellow_lights': -1,
                               'number_green_lights': -1
                               }
+
         self._dict_measurements = {'exp_id': -1,
+                                   'task_id': -1,
                                    'rep': -1,
                                    'weather': -1,
                                    'start_point': -1,
@@ -46,13 +50,15 @@ class Recording(object):
                                    }
 
         # Just in the case is the first time and there is no benchmark results folder
-        if not os.path.exists('_benchmarks_results'):
-            os.mkdir('_benchmarks_results')
+        # if not os.path.exists(log_dir):
+        #     os.mkdir(log_dir)
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
 
         # Generate the full path for the log files
-        self._path = os.path.join('_benchmarks_results'
-                                  , name_to_save
-                                  )
+        # self._path = os.path.join(log_dir
+        #                           , name_to_save
+        #                           )
+        self._path = str(Path(log_dir) / name_to_save)
 
         # Check for continuation of experiment, also returns the last line, used for test purposes
         # If you don't want to continue it will create a new path name with a number.
@@ -60,6 +66,9 @@ class Recording(object):
         # previous order
         self._path, _, self._summary_fieldnames, self._measurements_fieldnames\
             = self._continue_experiment(continue_experiment)
+
+        # print(self._path) # /media/aisl/SSD/ishihara/benchmark_results/v1_CoRL2017Short_Town01-7
+        self._base_name = self._path.replace(log_dir+'/', '')
 
         self._create_log_files()
 
@@ -76,6 +85,10 @@ class Recording(object):
     @property
     def path(self):
         return self._path
+
+    @property
+    def base_name(self):
+        return self._base_name
 
     def log_poses(self, start_index, end_index, weather_id):
         with open(self._internal_log_name, 'a+') as log:
@@ -96,16 +109,17 @@ class Recording(object):
         with open(self._internal_log_name, 'a+') as log:
             log.write('====== Finished Entire Benchmark ======')
 
-    def write_summary_results(self, experiment, pose, rep,
+    def write_summary_results(self, experiment, task_id, pose, rep,
                               path_distance, remaining_distance,
                               final_time, time_out, result,
                               end_pedestrian, end_vehicle, end_other,
-                              number_red_lights, number_green_lights):
+                              number_red_lights, number_yellow_lights, number_green_lights):
         """
         Method to record the summary of an episode(pose) execution
         """
 
         self._dict_summary['exp_id'] = experiment.task
+        self._dict_summary['task_id'] = task_id
         self._dict_summary['rep'] = rep
         self._dict_summary['weather'] = experiment.Conditions.WeatherId
         self._dict_summary['start_point'] = pose[0]
@@ -119,8 +133,8 @@ class Recording(object):
         self._dict_summary['end_vehicle_collision'] = end_vehicle
         self._dict_summary['end_other_collision'] = end_other
         self._dict_summary['number_red_lights'] = number_red_lights
+        self._dict_summary['number_yellow_lights'] = number_yellow_lights
         self._dict_summary['number_green_lights'] = number_green_lights
-
 
 
         with open(os.path.join(self._path, 'summary.csv'), 'a+') as ofd:
@@ -129,7 +143,7 @@ class Recording(object):
 
             w.writerow(self._dict_summary)
 
-    def write_measurements_results(self, experiment, rep, pose, reward_vec, control_vec):
+    def write_measurements_results(self, experiment, task_id, rep, pose, reward_vec, control_vec):
         """
         Method to record the measurements, sensors,
         controls and status of the entire benchmark.
@@ -139,6 +153,7 @@ class Recording(object):
             mw.fieldnames = self._measurements_fieldnames
             for i in range(len(reward_vec)):
                 self._dict_measurements['exp_id'] = experiment.task
+                self._dict_measurements['task_id'] = task_id
                 self._dict_measurements['rep'] = rep
                 self._dict_measurements['start_point'] = pose[0]
                 self._dict_measurements['end_point'] = pose[1]
@@ -190,7 +205,6 @@ class Recording(object):
         """
         Get the line on the file for the experiment.
         If continue_experiment is false and experiment exist, generates a new file path
-
         """
 
         def get_non_existent_path(f_name_path):
@@ -201,10 +215,10 @@ class Recording(object):
                 return f_name_path
             filename, file_extension = os.path.splitext(f_name_path)
             i = 1
-            new_f_name = "{}-{}{}".format(filename, i, file_extension)
+            new_f_name = "{}-{:0>3}{}".format(filename, i, file_extension)
             while os.path.exists(new_f_name):
                 i += 1
-                new_f_name = "{}-{}{}".format(filename, i, file_extension)
+                new_f_name = "{}-{:0>3}{}".format(filename, i, file_extension)
             return new_f_name
 
         # start the new path as the same one as before

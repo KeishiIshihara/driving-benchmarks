@@ -45,6 +45,7 @@ class BenchmarkRunner(object):
             self,
             city_name='Town01',
             name_to_save='Test',
+            log_dir='_benchmarks_results',
             continue_experiment=False,
             save_images=False,
             distance_for_success=2.0
@@ -69,7 +70,8 @@ class BenchmarkRunner(object):
         # The object used to record the benchmark and to able to continue after
         self._recording = Recording(name_to_save=name_to_save,
                                     continue_experiment=continue_experiment,
-                                    save_images=save_images
+                                    save_images=save_images,
+                                    log_dir=log_dir,
                                     )
 
         # We have a default planner instantiated that produces high level commands
@@ -109,6 +111,8 @@ class BenchmarkRunner(object):
             experiment_suite.get_number_of_poses_task(), experiment_suite.get_number_of_reps_poses())
 
         logging.info('START')
+        task_id = None
+        counter = -1
 
         for experiment in experiment_suite.get_experiments()[int(start_experiment):]:
             positions = client.load_settings(
@@ -117,10 +121,11 @@ class BenchmarkRunner(object):
             self._recording.log_start(experiment.task)
 
             for pose in experiment.poses[start_pose:]:
+                counter += 1
                 for rep in range(start_rep, experiment.repetitions):
-
                     start_index = pose[0]
                     end_index = pose[1]
+                    task_id = f'{counter}_task{experiment.task}_sp{start_index}_ep{end_index}'
                     client.start_episode(start_index)
                     # Print information on
                     logging.info('======== !!!! ==========')
@@ -142,24 +147,27 @@ class BenchmarkRunner(object):
                     logging.info('Timeout for Episode: %f', time_out)
                     # running the agent
                     (result, reward_vec, control_vec, final_time, remaining_distance, col_ped,
-                     col_veh, col_oth, number_of_red_lights, number_of_green_lights) = \
+                     col_veh, col_oth, number_of_red_lights, number_of_yellow_lights, number_of_green_lights) = \
                         self._run_navigation_episode(
                             agent, client, time_out, positions[end_index],
                             str(experiment.Conditions.WeatherId) + '_'
                             + str(experiment.task) + '_' + str(start_index)
                             + '.' + str(end_index), experiment_suite.metrics_parameters,
                             experiment_suite.collision_as_failure,
-                            experiment_suite.traffic_light_as_failure)
+                            experiment_suite.traffic_light_as_failure,
+                            experiment_suite.timeout_as_failure,
+                            task_id)
 
                     # Write the general status of the just ran episode
                     self._recording.write_summary_results(
-                        experiment, pose, rep, initial_distance,
+                        experiment, counter, pose, rep, initial_distance,
                         remaining_distance, final_time, time_out, result, col_ped, col_veh, col_oth,
-                        number_of_red_lights, number_of_green_lights)
+                        number_of_red_lights, number_of_yellow_lights, number_of_green_lights)
 
                     # Write the details of this episode.
-                    self._recording.write_measurements_results(experiment, rep, pose, reward_vec,
-                                                               control_vec)
+                    self._recording.write_measurements_results(experiment, counter, rep, pose,
+                                                               reward_vec, control_vec)
+
                     if result > 0:
                         logging.info('+++++ Target achieved in %f seconds! +++++',
                                      final_time)
@@ -345,8 +353,10 @@ class BenchmarkRunner(object):
                         if is_on_burning_point(self._map,
                                                measurement.player_measurements.transform.location)\
                                 and tl_dist < 6.0:
-                            if agent.traffic_light.state != 0:  # Not green
+                            if agent.traffic_light.state == 2:  # red
                                 return 'red'
+                            elif agent.traffic_light.state == 1:  # yellow
+                                return 'yellow'
                             else:
                                 return 'green'
 
@@ -361,7 +371,9 @@ class BenchmarkRunner(object):
             episode_name,
             metrics_parameters,
             collision_as_failure,
-            traffic_light_as_failure):
+            traffic_light_as_failure,
+            timeout_as_failure,
+            task_id):
         """
          Run one episode of the benchmark (Pose) for a certain agent.
 
@@ -382,7 +394,7 @@ class BenchmarkRunner(object):
         client.send_control(VehicleControl())
 
         initial_timestamp = measurements.game_timestamp
-        current_timestamp = initial_timestamp
+        current_timestamp = initial_timestamp + 1e-1
 
         # The vector containing all measurements produced on this episode
         measurement_vec = []
@@ -391,19 +403,30 @@ class BenchmarkRunner(object):
         frame = 0
         distance = 10000
         col_ped, col_veh, col_oth = 0, 0, 0
-        traffic_light_state, number_red_lights, number_green_lights = None, 0, 0
+        traffic_light_state, number_red_lights, number_yellow_lights, number_green_lights = None, 0, 0, 0
         fail = False
         success = False
         not_count = 0
+        # Call initialize method agent implements
+        agent.init(**{
+            'episode_name': episode_name,
+            'base_name': self._recording.base_name,
+            'timeout': time_out,
+            'task_id': task_id,
+            'start_time': initial_timestamp,
+        })
 
         while not fail and not success:
+            env = {'distance_to_goal': distance, 'red': number_red_lights,
+                   'yellow': number_yellow_lights, 'green': number_green_lights,
+                   'col.p': col_ped, 'col.v': col_veh, 'col.oth': col_oth}
 
             # Read data from server with the client
             measurements, sensor_data = client.read_data()
             # The directions to reach the goal are calculated.
             directions = self._get_directions(measurements.player_measurements.transform, target)
             # Agent process the data.
-            control = agent.run_step(measurements, sensor_data, directions, target)
+            control = agent.run_step(measurements, sensor_data, directions, target, env)
             # Send the control commands to the vehicle
             client.send_control(control)
 
@@ -433,10 +456,15 @@ class BenchmarkRunner(object):
             col_ped, col_veh, col_oth = self._has_agent_collided(measurements.player_measurements,
                                                                  metrics_parameters)
             # test if car crossed the traffic light
-            traffic_light_state = self._test_for_traffic_lights(measurements)
+            traffic_light_state = self._test_for_traffic_lights(measurements) # red means red or yellow
 
+            # total number of crossed intersections are numaber of red lights + green lights !!
             if traffic_light_state == 'red' and not_count == 0:
                 number_red_lights += 1
+                not_count = 20
+
+            elif traffic_light_state == 'yellow' and not_count == 0:
+                number_yellow_lights += 1
                 not_count = 20
 
             elif traffic_light_state == 'green' and not_count == 0:
@@ -449,7 +477,8 @@ class BenchmarkRunner(object):
 
             if distance < self._distance_for_success:
                 success = True
-            elif (current_timestamp - initial_timestamp) > (time_out * 1000):
+            # elif current_timestamp - initial_timestamp) > (time_out * 1000):
+            elif timeout_as_failure and (current_timestamp - initial_timestamp) > (time_out * 1000):
                 fail = True
             elif collision_as_failure and (col_ped or col_veh or col_oth):
                 fail = True
@@ -457,25 +486,28 @@ class BenchmarkRunner(object):
                 fail = True
             logging.info('Traffic Lights:')
             logging.info(
-                'red %f green %f, total %f',
-                number_red_lights, number_green_lights, number_red_lights + number_green_lights)
+                'red %f yellow %f green %f, total %f',
+                number_red_lights, number_yellow_lights, number_green_lights, number_red_lights + number_yellow_lights + number_green_lights)
             # Increment the vectors and append the measurements and controls.
             frame += 1
             measurement_vec.append(measurements.player_measurements)
             control_vec.append(control)
 
+        agent.cleanup()
+
         if success:
             return 1, measurement_vec, control_vec, float(
                 current_timestamp - initial_timestamp) / 1000.0, distance,  col_ped, col_veh, col_oth, \
-                   number_red_lights, number_green_lights
+                   number_red_lights, number_yellow_lights, number_green_lights
         return 0, measurement_vec, control_vec, time_out, distance, col_ped, col_veh, col_oth, \
-            number_red_lights, number_green_lights
+            number_red_lights, number_yellow_lights, number_green_lights
 
 
 def run_driving_benchmark(agent,
                           experiment_suite,
                           city_name='Town01',
                           log_name='Test',
+                          log_dir='_benchmarks_results',
                           continue_experiment=False,
                           host='127.0.0.1',
                           port=2000
@@ -486,16 +518,19 @@ def run_driving_benchmark(agent,
             with make_carla_client(host, port) as client:
                 # Hack to fix for the issue 310, we force a reset, so it does not get
                 #  the positions on first server reset.
-                client.load_settings(CarlaSettings())
+                carla_settings = CarlaSettings()
+                carla_settings.set(DisableTwoWheeledVehicles=True)
+                client.load_settings(carla_settings)
+                # client.load_settings(CarlaSettings())
                 client.start_episode(0)
 
                 # We instantiate the driving benchmark, that is the engine used to
                 # benchmark an agent. The instantiation starts the log process, sets
-
                 benchmark = BenchmarkRunner(city_name=city_name,
                                             name_to_save=log_name + '_'
                                                           + type(experiment_suite).__name__
                                                           + '_' + city_name,
+                                            log_dir=log_dir,
                                             continue_experiment=continue_experiment)
                 # This function performs the benchmark. It returns a dictionary summarizing
                 # the entire execution.

@@ -14,8 +14,12 @@ class ExperimentSuite(object):
         Function to return the timeout ,in milliseconds,
         that is calculated based on distance to goal.
         This is the same timeout as used on the CoRL paper.
+
+        * All timeouts can be extended as agent respects traffic lights
         """
-        return ((path_distance / 1000.0) / 10.0) * 3600.0 + 10.0
+        # return ((path_distance / 1000.0) / 10.0) * 3600.0 + 10.0 # default
+        # return ((path_distance / 1000.0) / 5.0) * 3600.0 + 10 # considering duration of stopping at red light (2 times longer than original)
+        return
 
     def get_number_of_poses_task(self):
         """
@@ -98,6 +102,10 @@ class ExperimentSuite(object):
     @property
     def traffic_light_as_failure(self):
         return False
+
+    @property
+    def timeout_as_failure(self):
+        return True
 
     @abc.abstractmethod
     def build_experiments(self):

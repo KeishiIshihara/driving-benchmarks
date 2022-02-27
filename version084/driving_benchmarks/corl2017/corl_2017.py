@@ -104,6 +104,16 @@ class CoRL2017(ExperimentSuite):
         camera.set_position(2.0, 0.0, 1.4)
         camera.set_rotation(-15.0, 0, 0)
 
+        DEBUG = 1
+
+        if DEBUG:
+            camera_debug = Camera('CameraDebug')
+            camera_debug.set(FOV=100)
+            # camera_debug.set_image_size(640, 480)
+            camera_debug.set_image_size(800, 600)
+            camera_debug.set_position(-5.5, 0.0, 3.0)
+            camera_debug.set_rotation(-18.0, 0, 0)
+
         if self._city_name == 'Town01':
             poses_tasks = self._poses_town01()
             vehicles_tasks = [0, 0, 0, 20]
@@ -113,11 +123,13 @@ class CoRL2017(ExperimentSuite):
             vehicles_tasks = [0, 0, 0, 15]
             pedestrians_tasks = [0, 0, 0, 50]
 
+
         experiments_vector = []
 
         for weather in self.weathers:
 
             for iteration in range(len(poses_tasks)):
+
                 poses = poses_tasks[iteration]
                 vehicles = vehicles_tasks[iteration]
                 pedestrians = pedestrians_tasks[iteration]
@@ -133,12 +145,15 @@ class CoRL2017(ExperimentSuite):
 
                 conditions.add_sensor(camera)
 
+                if DEBUG:
+                    conditions.add_sensor(camera_debug)
+
                 experiment = Experiment()
                 experiment.set(
                     Conditions=conditions,
                     Poses=poses,
                     Task=iteration,
-                    Repetitions=1
+                    Repetitions=1,
                 )
                 experiments_vector.append(experiment)
 
